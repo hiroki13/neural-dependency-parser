@@ -1,4 +1,4 @@
-# neural-dep-parser
+# Neural Dependency Parser
 
 ## Prerequisites
 * [python3](https://www.python.org/downloads/)
@@ -30,7 +30,7 @@ git clone https://github.com/hiroki13/neural-dep-parser.git
 - Or download as follows:
 ```
 wget https://dl.fbaipublicfiles.com/fasttext/vectors-crawl/cc.ja.300.vec.gz
-gunzip　cc.ja.300.vec
+gunzip　cc.ja.300.vec.gz
 ```
 - Put the embedding file to `data/emb`
 ```
