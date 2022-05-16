@@ -38,12 +38,15 @@ mkdir data/emb
 mv cc.ja.300.vec data/emb
 ```
 
-## Training
+## Training a parser
+- To train a parser (model), run the following line:
 ```
 python train_unlabeled_models.py --config_file data/config/config.weight.ud.json
 ```
+- The trained parser (model) will be saved at `checkpoint_ja_gsd-ud_fasttext`
 
 ## Run the trained parser
+- To use the trained parser for new sentences, run the following line:
 ```
 python run_unlabeled_models.py --config_file checkpoint_ja_gsd-ud_fasttext/config.json --data_path data/ja_gsd-ud/valid.json
 ```
@@ -52,3 +55,6 @@ python run_unlabeled_models.py --config_file checkpoint_ja_gsd-ud_fasttext/confi
 ```
 python scripts/extract_dep_proba.py --json checkpoint_ja_gsd-ud_fasttext/valid.predicted_heads.json
 ```
+
+## LICENSE
+MIT License
