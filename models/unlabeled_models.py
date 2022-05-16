@@ -5,6 +5,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from collections import defaultdict
+from decimal import Decimal, ROUND_HALF_UP
 import h5py
 import os
 import time
@@ -18,7 +19,7 @@ from tensorflow.contrib.rnn.python.ops.rnn import \
 
 from models.base_models import BaseModel
 from models.network_components import multi_conv1d, highway_network
-from utils.common import load_json, write_json, l2_normalize
+from utils.common import load_json, write_json
 
 VALID_BATCH_SIZE = 128
 
@@ -349,6 +350,7 @@ class UnlabeledWeightBasedModel(BaseModel):
   def _build_head_prediction_op(self):
     self.head_predicts = tf.cast(
       tf.argmax(self.head_logits, axis=-1), tf.int32)
+    self.head_proba = tf.nn.softmax(self.head_logits)
 
   def _build_answer_check_op(self):
     self._build_count_correct_heads_op()
@@ -402,11 +404,14 @@ class UnlabeledWeightBasedModel(BaseModel):
     seconds = time.time() - start_time
     self.logger.info("-- Train set")
     self.logger.info("---- Time: {:.2f} sec ({:.2f} sents/sec)".format(
-      seconds, num_sents / seconds))
+      seconds, num_sents / seconds)
+    )
     self.logger.info("---- Loss: {:.2f} ({:.2f}/{:d})".format(
-      avg_loss, loss_total, num_batches))
+      avg_loss, loss_total, num_batches)
+    )
     self.logger.info("---- UAS:{:>7.2%} ({:>6}/{:>6})".format(
-      UAS, num_correct_heads, num_tokens))
+      UAS, num_correct_heads, num_tokens)
+    )
     return avg_loss, loss_total
 
   def evaluate_epoch(self, batches, data_name):
@@ -435,9 +440,11 @@ class UnlabeledWeightBasedModel(BaseModel):
     seconds = time.time() - start_time
     self.logger.info("-- {} set".format(data_name))
     self.logger.info("---- Time: {:.2f} sec ({:.2f} sents/sec)".format(
-      seconds, num_sents / seconds))
+      seconds, num_sents / seconds)
+    )
     self.logger.info("---- UAS:{:>7.2%} ({:>6}/{:>6})".format(
-      UAS, num_correct_heads, num_tokens))
+      UAS, num_correct_heads, num_tokens)
+    )
     return UAS
 
   def train(self):
@@ -465,8 +472,10 @@ class UnlabeledWeightBasedModel(BaseModel):
       _ = self.train_epoch(train_set)
 
       if self.cfg["use_lr_decay"]:  # learning rate decay
-        self.cfg["lr"] = max(init_lr / (1.0 + self.cfg["lr_decay"] * epoch),
-                             self.cfg["minimal_lr"])
+        self.cfg["lr"] = max(
+          init_lr / (1.0 + self.cfg["lr_decay"] * epoch),
+          self.cfg["minimal_lr"]
+        )
 
       cur_valid_UAS = self.evaluate_epoch(valid_set, "Valid")
 
@@ -481,11 +490,17 @@ class UnlabeledWeightBasedModel(BaseModel):
 
   def _preprocess_input_data(self, preprocessor):
     input_data = preprocessor.load_dataset(
-      self.cfg["data_path"], keep_number=True,
-      lowercase=self.cfg["char_lowercase"])
+      self.cfg["data_path"],
+      keep_number=True,
+      lowercase=self.cfg["char_lowercase"]
+    )
     indexed_data = preprocessor.build_dataset(
-      input_data[:self.cfg["data_size"]], self.word_dict, self.char_dict,
-      self.pos_tag_dict, self.label_dict)
+      input_data[:self.cfg["data_size"]],
+      self.word_dict,
+      self.char_dict,
+      self.pos_tag_dict,
+      self.label_dict
+    )
     write_json(os.path.join(self.cfg["save_path"], "tmp.json"), indexed_data)
     self.logger.info("Input sentences: {:>7}".format(len(indexed_data)))
     return input_data, indexed_data
@@ -525,8 +540,14 @@ class UnlabeledWeightBasedModel(BaseModel):
       if self.cfg["use_bert"]:
         batch = self._add_bert_reps(batch, use_train_bert_hdf5=False)
       feed_dict = self._get_feed_dict(batch)
-      predicted_heads = self.sess.run([self.head_predicts], feed_dict)[0][0]
-      record["predicted_heads"] = [int(head) for head in predicted_heads]
+      predicted_heads, head_proba = self.sess.run(
+        [self.head_predicts, self.head_proba], feed_dict
+      )
+      record["predicted_heads"] = [int(head) for head in predicted_heads[0]]
+      record["head_proba"] = [
+        [float(Decimal(str(p)).quantize(
+          Decimal("0.0001"), rounding=ROUND_HALF_UP))
+         for p in proba] for proba in head_proba[0]]
 
       #########
       # Count #
@@ -547,9 +568,11 @@ class UnlabeledWeightBasedModel(BaseModel):
     accuracy = num_correct_heads / num_tokens
     seconds = time.time() - start_time
     self.logger.info("---- Time: {:.2f} sec ({:.2f} sents/sec)".format(
-      seconds, num_sents / seconds))
+      seconds, num_sents / seconds)
+    )
     self.logger.info("---- Accuracy:{:>7.2%} ({:>6}/{:>6})".format(
-      accuracy, num_correct_heads, num_tokens))
+      accuracy, num_correct_heads, num_tokens)
+    )
 
     data_name = os.path.splitext(os.path.basename(self.cfg["data_path"]))[0]
     if self.cfg["output_file"]:
@@ -590,549 +613,6 @@ class UnlabeledWeightBasedModel(BaseModel):
         batch = self._add_bert_reps(batch, use_train_bert_hdf5=False)
       feed_dict = self._get_feed_dict(batch)
       edge_reps = self.sess.run([self.edge_reps], feed_dict)[0]
-
-      for sent_id, sent_edge_reps in zip(batch["sent_id"], edge_reps):
-        f_hdf5.create_dataset(name='{}'.format(sent_id),
-                              dtype='float32',
-                              data=sent_edge_reps)
-    f_hdf5.close()
-
-    seconds = time.time() - start_time
-    self.logger.info("---- Time: {:.2f} sec".format(seconds))
-
-
-class UnlabeledInstanceBasedModel(UnlabeledWeightBasedModel):
-
-  def __init__(self, config, batcher, is_train=True):
-    super(UnlabeledInstanceBasedModel, self).__init__(
-      config, batcher, is_train)
-    self.k = config["k"]
-    self.sim = config["sim"]
-    self.use_all_instances = config["use_all_instances"]
-    self.precomputed_edge_rep = None
-
-  def _add_placeholders(self):
-    if self.cfg["use_bert"]:
-      self.bert_rep = tf.placeholder(
-        tf.float32, shape=[None, None, self.cfg["bert_dim"]], name="bert")
-    if self.cfg["use_words"] or self.cfg["use_bert"] is False:
-      self.words = tf.placeholder(
-        tf.int32, shape=[None, None], name="words")
-    if self.cfg["use_chars"]:
-      self.chars = tf.placeholder(
-        tf.int32, shape=[None, None, None], name="chars")
-    if self.cfg["use_pos_tags"]:
-      self.pos_tags = tf.placeholder(
-        tf.int32, shape=[None, None], name="pos_tags")
-
-    self.puncts = tf.placeholder(
-      tf.int32, shape=[None, None], name="puncts")
-    self.seq_len = tf.placeholder(
-      tf.int32, shape=[None], name="seq_len")
-    self.batch_size = tf.placeholder(
-      tf.int32, shape=None, name="batch_size")
-    self.n_sents = tf.placeholder(
-      tf.int32, shape=None, name="n_sents")
-
-    self.neighbor_deps = tf.placeholder(
-      tf.int32, shape=None, name="neighbor_dep_indices")
-    self.neighbor_heads = tf.placeholder(
-      tf.int32, shape=None, name="neighbor_head_indices")
-    self.heads = tf.placeholder(
-      tf.int32, shape=[None, None], name="heads")
-    self.precomp_neighbor_rep = tf.placeholder(
-      tf.float32, shape=self.cfg["num_units"],
-      name="precomp_neighbor_rep")
-
-    # hyperparameters
-    self.is_train = tf.placeholder(tf.bool, name="is_train")
-    self.keep_prob = tf.placeholder(tf.float32, name="rnn_keep_probability")
-    self.drop_rate = tf.placeholder(tf.float32, name="dropout_rate")
-    if self.cfg["use_bert"]:
-      self.bert_drop_rate = tf.placeholder(
-        tf.float32, name="bert_dropout_rate")
-    self.lr = tf.placeholder(tf.float32, name="learning_rate")
-
-  def _get_feed_dict(self, batch, keep_prob=1.0, is_train=False, lr=None):
-    feed_dict = {self.puncts: batch["puncts"],
-                 self.seq_len: batch["seq_len"],
-                 self.batch_size: batch["batch_size"],
-                 self.n_sents: batch["n_sents"]}
-    if self.cfg["use_bert"]:
-      feed_dict[self.bert_rep] = batch["bert_rep"]
-    if self.cfg["use_words"] or self.cfg["use_bert"] is False:
-      feed_dict[self.words] = batch["words"]
-    if self.cfg["use_chars"]:
-      feed_dict[self.chars] = batch["chars"]
-    if self.cfg["use_pos_tags"]:
-      feed_dict[self.pos_tags] = batch["pos_tags"]
-
-    if "neighbor_deps" in batch:
-      feed_dict[self.neighbor_deps] = batch["neighbor_deps"]
-    if "neighbor_heads" in batch:
-      feed_dict[self.neighbor_heads] = batch["neighbor_heads"]
-    if "precomp_neighbor_rep" in batch:
-      feed_dict[self.precomp_neighbor_rep] = batch["precomp_neighbor_rep"]
-
-    if "heads" in batch:
-      feed_dict[self.heads] = batch["heads"]
-
-    feed_dict[self.keep_prob] = keep_prob
-    feed_dict[self.drop_rate] = 1.0 - keep_prob
-    if self.cfg["use_bert"]:
-      feed_dict[self.bert_drop_rate] = 1.0 - self.cfg["bert_keep_prob"]
-    feed_dict[self.is_train] = is_train
-    if lr is not None:
-      feed_dict[self.lr] = lr
-    return feed_dict
-
-  def _build_encoder_op(self):
-    self._build_rnn_op()
-    self._build_head_and_dep_projection_op()
-    self._build_edge_dense_layer_op()
-    self._build_anchor_dep_and_head_rep_op()
-    self._build_anchor_edge_rep_op()
-    self._build_neighbor_dep_and_head_rep_op()
-    self._build_neighbor_edge_rep_op()
-
-  def _build_anchor_dep_and_head_rep_op(self):
-    with tf.variable_scope("anchor_dep_and_head_rep"):
-      n_sents = self.n_sents
-      n_tokens = self.seq_len[0]
-      # 1D: n_sents, 2D: n_tokens-1 (dep), 3D: 1, 4D: dim
-      self.anchor_dep_rep = tf.expand_dims(
-        self.dep_rep[:n_sents, 1:n_tokens], axis=2)
-      # 1D: n_sents, 2D: n_tokens-1 (dep), 3D: n_tokens (head), 4D: dim
-      self.anchor_head_rep = tf.expand_dims(
-        self.head_rep[:n_sents, :n_tokens], axis=1)
-
-  def _build_anchor_edge_rep_op(self):
-    with tf.variable_scope("anchor_edge_rep"):
-      # 1D: n_sents, 2D: n_tokens-1 (dep), 3D: n_tokens (head), 4D: dim
-      edge_rep = self._create_edge_rep(self.anchor_dep_rep,
-                                       self.anchor_head_rep)
-      self.anchor_edge_reps = tf.tensordot(edge_rep, self.edge_rep_dense,
-                                           axes=[-1, -1])
-      print("anchor edge rep shape: {}".format(
-        self.anchor_edge_reps.get_shape().as_list()))
-
-  def _build_neighbor_dep_and_head_rep_op(self):
-    with tf.variable_scope("neighbor_dep_and_head_rep"):
-      # 1D: k * n_tokens (including ROOT), 2D: dim
-      dep_rep = tf.reshape(self.dep_rep[self.n_sents:],
-                           shape=[-1, self.cfg["num_units"]])
-      head_rep = tf.reshape(self.head_rep[self.n_sents:],
-                            shape=[-1, self.cfg["num_units"]])
-      # 1D: k * (n_tokens-1), 2D: dim
-      self.neighbor_dep_rep = tf.gather(dep_rep, self.neighbor_deps)
-      self.neighbor_head_rep = tf.gather(head_rep, self.neighbor_heads)
-
-  def _build_neighbor_edge_rep_op(self):
-    with tf.variable_scope("neighbor_edge_rep"):
-      # 1D: k * (n_tokens-1), 2D: dim
-      edge_rep = self._create_edge_rep(self.neighbor_dep_rep,
-                                       self.neighbor_head_rep)
-      self.neighbor_edge_reps = tf.tensordot(edge_rep, self.edge_rep_dense,
-                                             axes=[-1, -1])
-
-  def _build_decoder_op(self):
-    self._build_train_logits_op()
-    self._build_head_logits_op()
-
-  def _build_train_logits_op(self):
-    with tf.name_scope("train_logits"):
-      if self.cfg["sim"] == "cos":
-        # 1D: n_sents, 2D: n_tokens-1, 3D: n_tokens, 4D: dim
-        anchor_edge_reps = tf.nn.l2_normalize(self.anchor_edge_reps, axis=-1)
-        # 1D: k * (n_tokens-1), 2D: dim
-        neighbor_edge_reps = tf.nn.l2_normalize(self.neighbor_edge_reps,
-                                                axis=-1)
-      else:
-        anchor_edge_reps = self.anchor_edge_reps
-        neighbor_edge_reps = self.neighbor_edge_reps
-
-      # 1D: dim
-      neighbor_edge_rep = tf.reduce_sum(neighbor_edge_reps, axis=0)
-      # scalar
-      n_neighbors = tf.cast(tf.shape(neighbor_edge_reps)[0], dtype=tf.float32)
-      # 1D: n_sents, 2D: n_tokens-1, 3D: n_tokens
-      logits = tf.tensordot(anchor_edge_reps, neighbor_edge_rep, axes=[-1, -1])
-      logits = logits / n_neighbors
-
-      if self.cfg["sim"] == "cos":
-        self.train_logits = logits * self.cfg["scaling_factor"]
-      else:
-        self.train_logits = logits
-
-  def _build_head_logits_op(self):
-    with tf.name_scope("head_logits"):
-      if self.cfg["sim"] == "cos":
-        anchor_edge_reps = tf.nn.l2_normalize(self.anchor_edge_reps, axis=-1)
-      else:
-        anchor_edge_reps = self.anchor_edge_reps
-      # 1D: n_sents, 2D: n_tokens-1, 3D: n_tokens
-      # precomp_neighbor_reps have already normalized when "cos"
-      self.head_logits = tf.tensordot(anchor_edge_reps,
-                                      self.precomp_neighbor_rep,
-                                      axes=[-1, -1])
-
-  def _build_head_loss_op(self):
-    losses = tf.nn.sparse_softmax_cross_entropy_with_logits(
-      logits=self.train_logits, labels=self.heads)
-    self.head_loss = tf.reduce_mean(tf.reduce_sum(losses, axis=-1))
-    tf.summary.scalar("head_loss", self.head_loss)
-
-  def _build_predict_op(self):
-    self._build_train_head_prediction_op()
-    self._build_head_prediction_op()
-
-  def _build_train_head_prediction_op(self):
-    self.train_head_predicts = tf.cast(
-      tf.argmax(self.train_logits, axis=-1), tf.int32)
-
-  def _build_answer_check_op(self):
-    self._build_count_correct_train_heads_op()
-    self._build_count_correct_heads_op()
-
-  def _build_count_correct_train_heads_op(self):
-    correct_heads = tf.cast(
-      tf.equal(self.train_head_predicts, self.heads), tf.int32)
-    n_tokens = (self.seq_len[0] - 1) * self.n_sents
-    if self.cfg["include_puncts"]:
-      correct_heads = correct_heads
-      self.num_train_tokens = n_tokens
-    else:
-      not_puncts = 1 - self.puncts
-      correct_heads = correct_heads * not_puncts
-      self.num_train_tokens = n_tokens - tf.reduce_sum(self.puncts)
-    self.num_correct_train_heads = tf.reduce_sum(correct_heads)
-
-  def _build_count_correct_heads_op(self):
-    correct_heads = tf.cast(
-      tf.equal(self.head_predicts, self.heads), tf.int32)
-    n_tokens = (self.seq_len[0] - 1) * self.n_sents
-    if self.cfg["include_puncts"]:
-      self.correct_heads = correct_heads
-      self.num_tokens = n_tokens
-    else:
-      not_puncts = 1 - self.puncts
-      self.correct_heads = correct_heads * not_puncts
-      self.num_tokens = n_tokens - tf.reduce_sum(self.puncts)
-    self.num_correct_heads = tf.reduce_sum(self.correct_heads)
-
-  def _add_bert_reps(self, batch, use_train_bert_hdf5):
-    batch = self.batcher.load_and_add_bert_reps(batch, use_train_bert_hdf5)
-    return self.batcher.pad_bert_reps(batch)
-
-  def precompute_edge_rep(self, dim_rep):
-    self.logger.info("------ Precomputing train data")
-
-    batch_size = max(self.cfg["batch_size"], VALID_BATCH_SIZE)
-    batches = self.batcher.batchnize_dataset(self.cfg["train_set"],
-                                             batch_size,
-                                             shuffle=True,
-                                             add_neighbor_sents=False)
-
-    start_time = time.time()
-    num_sents = 0
-    precomp_edge_rep = np.zeros(shape=dim_rep)
-    for batch in batches:
-      num_sents += batch["n_sents"]
-
-      if self.cfg["use_bert"]:
-        batch = self._add_bert_reps(batch, use_train_bert_hdf5=True)
-      feed_dict = self._get_feed_dict(batch)
-      edge_reps = self.sess.run([self.anchor_edge_reps], feed_dict)[0]
-
-      for sent_heads, sent_edge_reps in zip(batch["heads"], edge_reps):
-        for head, cand_reps in zip(sent_heads, sent_edge_reps):
-          rep = cand_reps[head]
-          if self.sim == "cos":
-            rep = l2_normalize(rep)
-          precomp_edge_rep += rep
-
-    self.precomputed_edge_rep = precomp_edge_rep
-    seconds = time.time() - start_time
-    self.logger.info("------ Time: {:.2f} sec ({:.2f} sents/sec)".format(
-      seconds, num_sents / seconds))
-
-  def precompute_edge_rep_for_random_sampling(self):
-    self.logger.info("------ Precomputing train data")
-
-    f_hdf5_path = os.path.join(self.cfg["checkpoint_path"],
-                               "train.edge_reps.hdf5")
-    if self.batcher.train_edge_reps_hdf5 is not None:
-      self.batcher.train_edge_reps_hdf5.close()
-    f_hdf5 = h5py.File(f_hdf5_path, 'w')
-
-    batch_size = max(self.cfg["batch_size"], VALID_BATCH_SIZE)
-    batches = self.batcher.batchnize_dataset(self.cfg["train_set"],
-                                             batch_size,
-                                             shuffle=True,
-                                             add_neighbor_sents=False)
-    start_time = time.time()
-    num_sents = 0
-    for batch in batches:
-      num_sents += batch["n_sents"]
-
-      if self.cfg["use_bert"]:
-        batch = self._add_bert_reps(batch, use_train_bert_hdf5=True)
-      feed_dict = self._get_feed_dict(batch)
-      edge_reps = self.sess.run([self.anchor_edge_reps], feed_dict)[0]
-
-      for sent_id, sent_heads, sent_edge_reps in zip(batch["sent_id"],
-                                                     batch["heads"],
-                                                     edge_reps):
-        gold_head_reps = [cand_reps[head] for head, cand_reps
-                          in zip(sent_heads, sent_edge_reps)]
-        f_hdf5.create_dataset(name='{}'.format(sent_id),
-                              dtype='float32',
-                              data=gold_head_reps)
-    f_hdf5.close()
-    self.batcher.train_edge_reps_hdf5 = h5py.File(f_hdf5_path, 'r')
-
-    seconds = time.time() - start_time
-    self.logger.info("------ Time: {:.2f} sec ({:.2f} sents/sec)".format(
-      seconds, num_sents / seconds))
-
-  def add_precomputed_rep_to_batch(self, batch):
-    if self.use_all_instances:
-      batch["precomp_neighbor_rep"] = self.precomputed_edge_rep
-    else:
-      rep = self.batcher.get_precomputed_train_rep(k=self.k)
-      batch["precomp_neighbor_rep"] = rep
-    return batch
-
-  def train_epoch(self, batches):
-    loss_total = 0.
-    num_tokens = 0
-    num_sents = 0
-    num_batches = 0
-    num_correct_heads = 0
-    start_time = time.time()
-
-    for batch in batches:
-      num_batches += 1
-      if num_batches % 100 == 0:
-        print("%d" % num_batches, flush=True, end=" ")
-
-      if self.cfg["use_bert"]:
-        batch = self._add_bert_reps(batch, use_train_bert_hdf5=True)
-      feed_dict = self._get_feed_dict(batch, is_train=True,
-                                      keep_prob=self.cfg["keep_prob"],
-                                      lr=self.cfg["lr"])
-      outputs = self.sess.run([self.train_op,
-                               self.loss,
-                               self.num_correct_train_heads,
-                               self.num_train_tokens],
-                              feed_dict)
-      _, train_loss, num_cur_correct_heads, num_cur_tokens = outputs
-
-      loss_total += train_loss
-      num_correct_heads += num_cur_correct_heads
-      num_tokens += num_cur_tokens
-      num_sents += batch["n_sents"]
-
-    avg_loss = loss_total / num_batches
-    UAS = num_correct_heads / num_tokens
-    seconds = time.time() - start_time
-    self.logger.info("-- Train set")
-    self.logger.info("---- Time: {:.2f} sec ({:.2f} sents/sec)".format(
-      seconds, num_sents / seconds))
-    self.logger.info("---- Loss: {:.2f} ({:.2f}/{:d})".format(
-      avg_loss, loss_total, num_batches))
-    self.logger.info("---- UAS:{:>7.2%} ({:>6}/{:>6})".format(
-      UAS, num_correct_heads, num_tokens))
-    return avg_loss, loss_total
-
-  def evaluate_epoch(self, batches, data_name):
-    if self.use_all_instances:
-      self.precompute_edge_rep(dim_rep=self.cfg["num_units"])
-    else:
-      self.precompute_edge_rep_for_random_sampling()
-
-    num_tokens = 0
-    num_sents = 0
-    num_batches = 0
-    num_correct_heads = 0
-    start_time = time.time()
-
-    for batch in batches:
-      num_batches += 1
-      if num_batches % 100 == 0:
-        print("%d" % num_batches, flush=True, end=" ")
-
-      batch = self.add_precomputed_rep_to_batch(batch)
-      if self.cfg["use_bert"]:
-        batch = self._add_bert_reps(batch, use_train_bert_hdf5=False)
-      feed_dict = self._get_feed_dict(batch)
-      num_cur_correct_heads, num_cur_tokens = self.sess.run(
-        [self.num_correct_heads, self.num_tokens], feed_dict)
-
-      num_correct_heads += num_cur_correct_heads
-      num_tokens += num_cur_tokens
-      num_sents += batch["n_sents"]
-
-    UAS = num_correct_heads / num_tokens
-    seconds = time.time() - start_time
-    self.logger.info("-- {} set".format(data_name))
-    self.logger.info("---- Time: {:.2f} sec ({:.2f} sents/sec)".format(
-      seconds, num_sents / seconds))
-    self.logger.info("---- UAS:{:>7.2%} ({:>6}/{:>6})".format(
-      UAS, num_correct_heads, num_tokens))
-    return UAS
-
-  def train(self):
-    self.logger.info(str(self.cfg))
-    write_json(os.path.join(self.cfg["checkpoint_path"], "config.json"),
-               self.cfg)
-
-    epochs = self.cfg["epochs"]
-    train_path = self.cfg["train_set"]
-    valid_path = self.cfg["valid_set"]
-    valid_batch_size = max(self.cfg["batch_size"], VALID_BATCH_SIZE)
-    valid_set = list(self.batcher.batchnize_dataset(
-      valid_path, valid_batch_size,
-      shuffle=True, add_neighbor_sents=False))
-    best_UAS = -np.inf
-    init_lr = self.cfg["lr"]
-
-    self.log_trainable_variables()
-    self.logger.info("Start training...")
-    self._add_summary()
-    for epoch in range(1, epochs + 1):
-      self.logger.info('Epoch {}/{}:'.format(epoch, epochs))
-
-      train_set = self.batcher.batchnize_dataset(
-        train_path, self.cfg["batch_size"],
-        shuffle=True, add_neighbor_sents=True)
-      _ = self.train_epoch(train_set)
-
-      if self.cfg["use_lr_decay"]:  # learning rate decay
-        self.cfg["lr"] = max(init_lr / (1.0 + self.cfg["lr_decay"] * epoch),
-                             self.cfg["minimal_lr"])
-
-      cur_valid_UAS = self.evaluate_epoch(valid_set, "Valid")
-
-      if cur_valid_UAS > best_UAS:
-        best_UAS = cur_valid_UAS
-        self.save_session(epoch)
-        self.logger.info(
-          "-- new BEST UAS on Valid set: {:>7.2%}".format(best_UAS))
-
-    self.train_writer.close()
-    self.test_writer.close()
-
-  def make_one_batch(self, record):
-    batch = defaultdict(list)
-    for field in ["sent_id", "words", "chars", "pos_tags", "puncts"]:
-      batch[field].append(record[field])
-    if self.cfg["use_nearest_sents"]:
-      batch["train_sent_ids"] = record["train_sent_ids"]
-    return self.batcher.make_each_batch(batch, False)
-
-  def eval(self, preprocessor):
-    self.logger.info(str(self.cfg))
-    raw_data = load_json(self.cfg["data_path"])[:self.cfg["data_size"]]
-    _, indexed_data = self._preprocess_input_data(preprocessor)
-
-    ################################################
-    # Precomputing edge reps of training instances #
-    ################################################
-    if self.use_all_instances:
-      self.precompute_edge_rep(dim_rep=self.cfg["num_units"])
-    else:
-      self.precompute_edge_rep_for_random_sampling()
-
-    #############
-    # Main loop #
-    #############
-    num_tokens = 0
-    num_sents = len(indexed_data)
-    num_correct_heads = 0
-    start_time = time.time()
-
-    print("PREDICTION START")
-    for sent_id, (record, indexed_sent) in enumerate(zip(raw_data,
-                                                         indexed_data)):
-      assert record["sent_id"] == indexed_sent["sent_id"]
-      if (sent_id + 1) % 100 == 0:
-        print("%d" % (sent_id + 1), flush=True, end=" ")
-
-      ##############
-      # Prediction #
-      ##############
-      batch = self.make_one_batch(indexed_sent)
-      batch = self.add_precomputed_rep_to_batch(batch)
-      if self.cfg["use_bert"]:
-        batch = self._add_bert_reps(batch, use_train_bert_hdf5=False)
-      feed_dict = self._get_feed_dict(batch)
-      predicted_heads = self.sess.run([self.head_predicts], feed_dict)[0][0]
-      record["predicted_heads"] = [int(head) for head in predicted_heads]
-
-      #########
-      # Count #
-      #########
-      puncts = None if self.cfg["include_puncts"] else indexed_sent["puncts"]
-      num_cur_correct_heads = self._count_correct_heads(
-        gold_heads=record["heads"],
-        predicted_heads=record["predicted_heads"],
-        puncts=puncts
-      )
-      num_correct_heads += num_cur_correct_heads
-      # -1 means excluding the ROOT node
-      num_tokens += batch["seq_len"][0] - 1
-      # - np.sum(batch["puncts"]) means excluding punctuations
-      if self.cfg["include_puncts"] is False:
-        num_tokens -= np.sum(batch["puncts"])
-
-    accuracy = num_correct_heads / num_tokens
-    seconds = time.time() - start_time
-    self.logger.info("---- Time: {:.2f} sec ({:.2f} sents/sec)".format(
-      seconds, num_sents / seconds))
-    self.logger.info("---- Accuracy:{:>7.2%} ({:>6}/{:>6})".format(
-      accuracy, num_correct_heads, num_tokens))
-
-    data_name = os.path.splitext(os.path.basename(self.cfg["data_path"]))[0]
-    if self.cfg["output_file"]:
-      if self.cfg["output_file"].endswith(".json"):
-        file_name = self.cfg["output_file"]
-      else:
-        file_name = self.cfg["output_file"] + ".json"
-      data_path = os.path.join(self.cfg["checkpoint_path"], file_name)
-    else:
-      data_path = os.path.join(self.cfg["checkpoint_path"],
-                               data_name + ".predicted_heads.json")
-    write_json(data_path, raw_data)
-
-  def save_edge_representation(self, preprocessor):
-    self.logger.info(str(self.cfg))
-    _, indexed_data = self._preprocess_input_data(preprocessor)
-    batch_size = max(self.cfg["batch_size"], VALID_BATCH_SIZE)
-    batches = self.batcher.batchnize_dataset(
-      os.path.join(self.cfg["save_path"], "tmp.json"),
-      batch_size, shuffle=True, add_neighbor_sents=False)
-
-    #############
-    # Main loop #
-    #############
-    start_time = time.time()
-    data_name = os.path.splitext(os.path.basename(self.cfg["data_path"]))[0]
-    f_hdf5_path = os.path.join(self.cfg["checkpoint_path"],
-                               "%s.edge_reps.hdf5" % data_name)
-    f_hdf5 = h5py.File(f_hdf5_path, 'w')
-
-    print("PREDICTION START")
-    num_batches = 0
-    for batch in batches:
-      num_batches += 1
-      if (num_batches % 100) == 0:
-        print(num_batches, flush=True, end=" ")
-
-      if self.cfg["use_bert"]:
-        batch = self._add_bert_reps(batch, use_train_bert_hdf5=False)
-      feed_dict = self._get_feed_dict(batch)
-      edge_reps = self.sess.run([self.anchor_edge_reps], feed_dict)[0]
 
       for sent_id, sent_edge_reps in zip(batch["sent_id"], edge_reps):
         f_hdf5.create_dataset(name='{}'.format(sent_id),

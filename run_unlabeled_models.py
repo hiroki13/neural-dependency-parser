@@ -8,10 +8,8 @@ import argparse
 import os
 import json
 
-from models.unlabeled_models import UnlabeledWeightBasedModel, \
-  UnlabeledInstanceBasedModel
-from utils.batchers import WeightBatcher, UnlabeledInstanceBatcher, \
-  BERTWeightBatcher, BERTUnlabeledInstanceBatcher
+from models.unlabeled_models import UnlabeledWeightBasedModel
+from utils.batchers import WeightBatcher, BERTWeightBatcher
 from utils.preprocessors import Preprocessor
 
 
@@ -50,18 +48,11 @@ def main(args):
 
   preprocessor = Preprocessor(config)
 
-  if config["decode"] == "weight":
-    if config["use_bert"]:
-      batcher = BERTWeightBatcher(config)
-    else:
-      batcher = WeightBatcher(config)
-    model = UnlabeledWeightBasedModel(config, batcher)
+  if config["use_bert"]:
+    batcher = BERTWeightBatcher(config)
   else:
-    if config["use_bert"]:
-      batcher = BERTUnlabeledInstanceBatcher(config)
-    else:
-      batcher = UnlabeledInstanceBatcher(config)
-    model = UnlabeledInstanceBasedModel(config, batcher)
+    batcher = WeightBatcher(config)
+  model = UnlabeledWeightBasedModel(config, batcher)
 
   model.restore_last_session(config["checkpoint_path"])
 

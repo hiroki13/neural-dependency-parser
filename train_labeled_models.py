@@ -8,12 +8,9 @@ import argparse
 import os
 import json
 
-from models.labeled_models import LabeledWeightBasedModel, \
-  LabeledInstanceBasedModel
-from models.multitask_models import MultiTaskWeightBasedModel, \
-  MultiTaskInstanceBasedModel
-from utils.batchers import WeightBatcher, LabeledInstanceBatcher,\
-  BERTWeightBatcher, BERTLabeledInstanceBatcher
+from models.labeled_models import LabeledWeightBasedModel
+from models.multitask_models import MultiTaskWeightBasedModel
+from utils.batchers import WeightBatcher, BERTWeightBatcher
 from utils.preprocessors import Preprocessor
 from utils.common import get_vocab_size_and_dim
 
@@ -98,30 +95,22 @@ def main(args):
   config = set_config(args, config)
   preprocessor = Preprocessor(config)
 
-  # create dataset from raw data files
   if not os.path.exists(config["save_path"]):
     preprocessor.preprocess()
-  config["vocab_size"], config["emb_dim"] = get_vocab_size_and_dim(
-    config["pretrained_emb"])
 
-  if config["model_name"] == "instance":
-    if config["use_bert"]:
-      batcher = BERTLabeledInstanceBatcher(config)
-    else:
-      batcher = LabeledInstanceBatcher(config)
-    if config["task_name"] == "multi":
-      model = MultiTaskInstanceBasedModel(config, batcher)
-    else:
-      model = LabeledInstanceBasedModel(config, batcher)
+  config["vocab_size"], config["emb_dim"] = get_vocab_size_and_dim(
+    config["pretrained_emb"]
+  )
+
+  if config["use_bert"]:
+    batcher = BERTWeightBatcher(config)
   else:
-    if config["use_bert"]:
-      batcher = BERTWeightBatcher(config)
-    else:
-      batcher = WeightBatcher(config)
-    if config["task_name"] == "multi":
-      model = MultiTaskWeightBasedModel(config, batcher)
-    else:
-      model = LabeledWeightBasedModel(config, batcher)
+    batcher = WeightBatcher(config)
+  if config["task_name"] == "multi":
+    model = MultiTaskWeightBasedModel(config, batcher)
+  else:
+    model = LabeledWeightBasedModel(config, batcher)
+
   model.train()
 
 

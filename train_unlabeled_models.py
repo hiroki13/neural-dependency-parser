@@ -89,16 +89,18 @@ def main(args):
   config = set_config(args, config)
   preprocessor = Preprocessor(config)
 
-  # create dataset from raw data files
   if not os.path.exists(config["save_path"]):
     preprocessor.preprocess()
+
   config["vocab_size"], config["emb_dim"] = get_vocab_size_and_dim(
-    config["pretrained_emb"])
+    config["pretrained_emb"]
+  )
 
   if config["use_bert"]:
     batcher = BERTWeightBatcher(config)
   else:
     batcher = WeightBatcher(config)
+
   model = UnlabeledWeightBasedModel(config, batcher)
   model.train()
 
