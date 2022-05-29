@@ -25,7 +25,7 @@ git clone https://github.com/hiroki13/neural-dependency-parser.git
 ## Data Preparation
 - Download datasets and convert them to json files:
 `./create_ud_datasets.sh`
-- Download a [Japanese pre-trained model](https://drive.google.com/file/d/1-4TR20NHYPEg47gc4hBHW8FAN0RDCeyg/view?usp=sharing)
+- Download a [Japanese pre-trained model](https://drive.google.com/file/d/1mPW-0qPGPEYVl3TgSPH6OQUsWVpx3fnM/view?usp=sharing)
 
 ## Embedding Preparation
 - Go to `https://fasttext.cc/docs/en/crawl-vectors.html` and download the embeddings you want
