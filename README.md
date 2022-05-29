@@ -12,18 +12,20 @@ conda create -n dep-tf python=3.6
 source activate dep-tf
 conda install -c conda-forge tensorflow
 pip install ujson tqdm
-git clone https://github.com/hiroki13/neural-dep-parser.git
+git clone https://github.com/hiroki13/neural-dependency-parser.git
 ```
 - GPU
 ```
 conda create -n dep-tf python=3.6
 source activate dep-tf
 pip install tensorflow-gpu==1.10 ujson tqdm
-git clone https://github.com/hiroki13/neural-dep-parser.git
+git clone https://github.com/hiroki13/neural-dependency-parser.git
 ```
 
 ## Data Preparation
+- Download datasets and convert them to json files:
 `./create_ud_datasets.sh`
+- Download a [Japanese pre-trained model](https://drive.google.com/file/d/1-4TR20NHYPEg47gc4hBHW8FAN0RDCeyg/view?usp=sharing)
 
 ## Embedding Preparation
 - Go to `https://fasttext.cc/docs/en/crawl-vectors.html` and download the embeddings you want
