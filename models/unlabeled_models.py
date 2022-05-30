@@ -509,8 +509,6 @@ class UnlabeledWeightBasedModel(BaseModel):
     batch = defaultdict(list)
     for field in ["sent_id", "words", "chars", "pos_tags", "puncts"]:
       batch[field].append(record[field])
-    if self.cfg["use_nearest_sents"]:
-      batch["train_sent_ids"] = record["train_sent_ids"]
     return self.batcher.make_each_batch(batch)
 
   def eval(self, preprocessor):
@@ -586,39 +584,61 @@ class UnlabeledWeightBasedModel(BaseModel):
                                data_name + ".predicted_heads.json")
     write_json(data_path, raw_data)
 
-  def save_edge_representation(self, preprocessor):
+  def predict(self, preprocessor):
     self.logger.info(str(self.cfg))
-    _, indexed_data = self._preprocess_input_data(preprocessor)
-    batches = self.batcher.batchnize_dataset(
-      os.path.join(self.cfg["save_path"], "tmp.json"),
-      self.cfg["batch_size"], shuffle=True)
+    data_path = self.cfg["data_path"]
+    if data_path.endswith(".json"):
+      raw_data = load_json(data_path)[:self.cfg["data_size"]]
+      _, indexed_data = self._preprocess_input_data(preprocessor)
+    else:
+      raw_data = preprocessor.load_txt_data(data_path)[:self.cfg["data_size"]]
+      converted_data = preprocessor.convert_words_for_parsing(
+        raw_data,
+        keep_number=True,
+        lowercase=self.cfg["char_lowercase"]
+      )
+      indexed_data = preprocessor.build_dataset(
+        converted_data,
+        self.word_dict,
+        self.char_dict,
+        self.pos_tag_dict,
+        self.label_dict,
+        add_heads=False,
+        add_labels=False
+      )
+    write_json(os.path.join(self.cfg["save_path"], "tmp.json"), indexed_data)
+    self.logger.info("Input sentences: {:>7}".format(len(indexed_data)))
 
     #############
     # Main loop #
     #############
+    num_sents = len(indexed_data)
     start_time = time.time()
-    data_name = os.path.splitext(os.path.basename(self.cfg["data_path"]))[0]
-    f_hdf5_path = os.path.join(self.cfg["checkpoint_path"],
-                               "%s.edge_reps.hdf5" % data_name)
-    f_hdf5 = h5py.File(f_hdf5_path, 'w')
 
     print("PREDICTION START")
-    num_batches = 0
-    for batch in batches:
-      num_batches += 1
-      if (num_batches % 100) == 0:
-        print(num_batches, flush=True, end=" ")
+    for sent_id, (record, indexed_sent) in enumerate(zip(raw_data,
+                                                         indexed_data)):
+      if (sent_id + 1) % 100 == 0:
+        print("%d" % (sent_id + 1), flush=True, end=" ")
 
+      ##############
+      # Prediction #
+      ##############
+      batch = self.make_one_batch(indexed_sent)
       if self.cfg["use_bert"]:
         batch = self._add_bert_reps(batch, use_train_bert_hdf5=False)
       feed_dict = self._get_feed_dict(batch)
-      edge_reps = self.sess.run([self.edge_reps], feed_dict)[0]
-
-      for sent_id, sent_edge_reps in zip(batch["sent_id"], edge_reps):
-        f_hdf5.create_dataset(name='{}'.format(sent_id),
-                              dtype='float32',
-                              data=sent_edge_reps)
-    f_hdf5.close()
+      predicted_heads, head_proba = self.sess.run(
+        [self.head_predicts, self.head_proba], feed_dict
+      )
+      record["predicted_heads"] = [int(head) for head in predicted_heads[0]]
+      record["head_proba"] = [
+        [float(Decimal(str(p)).quantize(
+          Decimal("0.0001"), rounding=ROUND_HALF_UP))
+         for p in proba] for proba in head_proba[0]]
 
     seconds = time.time() - start_time
-    self.logger.info("---- Time: {:.2f} sec".format(seconds))
+    self.logger.info("---- Time: {:.2f} sec ({:.2f} sents/sec)".format(
+      seconds, num_sents / seconds)
+    )
+    write_json(self.cfg["output_file"], raw_data)

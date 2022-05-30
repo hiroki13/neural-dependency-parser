@@ -38,7 +38,11 @@ def set_config(args, config):
   if args.unuse_all_instances:
     config["use_all_instances"] = False
   config["use_nearest_sents"] = args.use_nearest_sents
-  config["output_file"] = args.output_file
+  if args.output_file.endswith(".json"):
+    file_name = args.output_file
+  else:
+    file_name = args.output_file + ".json"
+  config["output_file"] = file_name
   return config
 
 
@@ -59,14 +63,14 @@ def main(args):
   if args.mode == "eval":
     model.eval(preprocessor)
   else:
-    model.save_edge_representation(preprocessor)
+    model.predict(preprocessor)
 
 
 if __name__ == '__main__':
   parser = argparse.ArgumentParser()
   parser.add_argument('--mode',
-                      default='eval',
-                      help='eval/edge_rep')
+                      default='pred',
+                      help='eval/pred')
   parser.add_argument('--config_file',
                       required=True,
                       default='data/config/config.json',
@@ -113,6 +117,7 @@ if __name__ == '__main__':
                       default=False,
                       help='whether or not to use all training instances')
   parser.add_argument('--output_file',
-                      default=None,
+                      default='heads_predicted.json',
+                      type=str,
                       help='output file name')
   main(parser.parse_args())

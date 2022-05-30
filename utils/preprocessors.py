@@ -34,10 +34,32 @@ class Preprocessor(object):
               "pos_tags": [ROOT_POS_TAG] + record["pos_tags"],
               "heads": record["heads"],
               "labels": record["labels"]}
-      if "train_sent_ids" in record:
-        sent["train_sent_ids"] = record["train_sent_ids"]
       dataset.append(sent)
     return dataset
+
+  @staticmethod
+  def load_txt_data(filename):
+    dataset = []
+    sent_id = 0
+    with codecs.open(filename, mode='r', encoding='utf-8') as f:
+      for line in f:
+        dataset.append({"sent_id": sent_id, "words": line.rstrip().split(' ')})
+        sent_id += 1
+    return dataset
+
+  @staticmethod
+  def convert_words_for_parsing(dataset, keep_number=False, lowercase=True):
+    converted_dataset = []
+    sent_id = 0
+    for record in dataset:
+        words = [word_convert(word,
+                              keep_number=keep_number,
+                              lowercase=lowercase)
+                 for word in record["words"]]
+        converted_dataset.append({"sent_id": sent_id,
+                                  "words": [ROOT_WORD] + words})
+        sent_id += 1
+    return converted_dataset
 
   @staticmethod
   def load_vocab(path):
@@ -124,9 +146,12 @@ class Preprocessor(object):
           word = word_convert(word, keep_number=False, lowercase=True)
           word_id = word_dict[word] if word in word_dict else word_dict[UNK]
         words_ids.append(word_id)
-      pos_tags_ids = [pos_tag_dict[tag]
-                      if tag in pos_tag_dict else pos_tag_dict[UNK]
-                      for tag in record["pos_tags"]]
+      if "pos_tags" in record:
+        pos_tags_ids = [pos_tag_dict[tag]
+                        if tag in pos_tag_dict else pos_tag_dict[UNK]
+                        for tag in record["pos_tags"]]
+      else:
+        pos_tags_ids = []
       sent = {"sent_id": record["sent_id"],
               "words": words_ids,
               "chars": chars_ids,
@@ -138,8 +163,6 @@ class Preprocessor(object):
         labels_ids = [label_dict[label] if label in label_dict else -1
                       for label in record["labels"]]
         sent["labels"] = labels_ids
-      if "train_sent_ids" in record:
-        sent["train_sent_ids"] = record["train_sent_ids"]
       dataset.append(sent)
     return dataset
 
