@@ -27,11 +27,12 @@ git clone https://github.com/hiroki13/neural-dependency-parser.git
 - Download datasets and convert them to json files:
 `./create_ud_datasets.sh`
 - Download a [Japanese pre-trained model](https://drive.google.com/file/d/1mPW-0qPGPEYVl3TgSPH6OQUsWVpx3fnM/view?usp=sharing)
-### Run a parser with the downloaded model and obtain the output file `heads_predicted.json`:
+### Run a parser with the downloaded model:
 ```
 python run_unlabeled_models.py --mode pred --config_file ckpt_ja_gsd-ud_unlabeled_weight_keep08_0/config.json --data_path data/example/example.ja.txt --output_file heads_predicted.json
 ```
-### Print dependencies and head probabilities produced by the trained parser
+- You will obtain the output file `heads_predicted.json`
+### Print dependencies and head probabilities produced by the trained parser:
 ```
 python scripts/extract_dep_proba.py --json heads_predicted.json
 ```
