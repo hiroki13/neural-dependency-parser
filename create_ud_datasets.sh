@@ -8,16 +8,16 @@
 
 # UD download page: https://universaldependencies.org/#download
 # Download UD datasets (download the latest version)
-wget https://lindat.mff.cuni.cz/repository/xmlui/bitstream/handle/11234/1-3424/ud-treebanks-v2.7.tgz
-tar -xzvf ud-treebanks-v2.7.tgz
-mv ud-treebanks-v2.7 data/
+#wget https://lindat.mff.cuni.cz/repository/xmlui/bitstream/handle/11234/1-3424/ud-treebanks-v2.7.tgz
+#tar -xzvf ud-treebanks-v2.7.tgz
+#mv ud-treebanks-v2.7 data/
 
 # Select one file from data/ud-treebanks-v2.7
 dir_name=UD_Japanese-GSD
 # Make a new directory for the dataset to convert
-mkdir data/$dir_name
+#mkdir data/$dir_name
 data_name=ja_gsd-ud
 # Convert a conllu file to its json file
-python scripts/convert_ud_to_json.py --input_file data/$dir_name/"$data_name"-train.conllu --output_file data/$data_name/train.json
-python scripts/convert_ud_to_json.py --input_file data/$dir_name/"$data_name"-dev.conllu --output_file data/$data_name/valid.json
-python scripts/convert_ud_to_json.py --input_file data/$dir_name/"$data_name"-test.conllu --output_file data/$data_name/test.json
+python scripts/convert_ud_to_json.py --input_file data/$dir_name/"$data_name"-train.conllu --output_file data/$dir_name/train.json
+python scripts/convert_ud_to_json.py --input_file data/$dir_name/"$data_name"-dev.conllu --output_file data/$dir_name/valid.json
+python scripts/convert_ud_to_json.py --input_file data/$dir_name/"$data_name"-test.conllu --output_file data/$dir_name/test.json
