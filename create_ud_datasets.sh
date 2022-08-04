@@ -15,7 +15,7 @@ mv ud-treebanks-v2.7 data/
 # Select one file from data/ud-treebanks-v2.7
 dir_name=UD_Japanese-GSD
 # Make a new directory for the dataset to convert
-mkdir data/$dir_name
+mv data/ud-treebanks-v2.7/$dir_name data
 data_name=ja_gsd-ud
 # Convert a conllu file to its json file
 python scripts/convert_ud_to_json.py --input_file data/$dir_name/"$data_name"-train.conllu --output_file data/$data_name/train.json

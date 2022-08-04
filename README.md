@@ -26,7 +26,8 @@ git clone https://github.com/hiroki13/neural-dependency-parser.git
 ### Data Preparation
 - Download datasets and convert them to json files:
 `./create_ud_datasets.sh`
-- Download a [Japanese pre-trained model](https://drive.google.com/file/d/1mPW-0qPGPEYVl3TgSPH6OQUsWVpx3fnM/view?usp=sharing)
+- Download a [Japanese pre-trained model (large)](https://drive.google.com/file/d/1mPW-0qPGPEYVl3TgSPH6OQUsWVpx3fnM/view?usp=sharing)
+- Download a [Japanese pre-trained model (small)](https://drive.google.com/file/d/1FepOG_9KbjwWgKIQKZ0Yy54Ebu84Nlk3/view?usp=sharing)
 ### Run a parser with the downloaded model:
 ```
 python run_unlabeled_models.py --mode pred --config_file ckpt_ja_gsd-ud_unlabeled_weight_keep08_0/config.json --data_path data/example/example.ja.txt --output_file heads_predicted.json
